@@ -1,5 +1,9 @@
 import os
+import warnings
 import google.generativeai as genai
+
+# Silence deprecation warning (does NOT affect execution)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
@@ -12,10 +16,10 @@ def generate_best_post(topic, articles):
 
     context = ""
     for a in articles:
-        context += f"\nSource: {a['source']}\nTitle: {a['title']}\nSummary: {a['summary']}\n"
+        context += f"\nTitle: {a['title']}\nSummary: {a['summary']}\n"
 
     prompt = f"""
-You are a senior editor for a top news media account on X.
+You are a senior editor for a professional news account on X.
 
 TASK:
 Compare multiple reports about the SAME news and write ONE best post.
@@ -24,11 +28,11 @@ RULES:
 - Neutral, professional tone
 - Clear English
 - Headline under 180 characters
-- 3 bullet points max
-- Choose facts common across sources
-- DO NOT repeat source names
-- Generate BEST hashtags (3–5) for reach
-- NO emojis in headline
+- Max 3 bullet points
+- Use only confirmed facts
+- Do NOT mention sources
+- Generate BEST hashtags (3–5)
+- NO emojis
 - NO misinformation
 
 NEWS CONTEXT:
