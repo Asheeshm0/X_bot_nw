@@ -1,52 +1,28 @@
 import feedparser
+import re
 import random
 
-# ---------------- FEED SOURCES ----------------
 FEEDS = {
-    "NEWS": [
-        "https://feeds.reuters.com/reuters/topNews",
-        "https://www.bbc.com/news/rss.xml"
-    ],
-    "TECH": [
-        "https://feeds.feedburner.com/TechCrunch/",
-        "https://www.theverge.com/rss/index.xml"
-    ],
-    "FINANCE": [
-        "https://feeds.reuters.com/reuters/businessNews",
-        "https://www.cnbc.com/id/10001147/device/rss/rss.html"
-    ]
+    "TECH": ["https://www.theverge.com/rss/index.xml"],
+    "POLITICS": ["https://feeds.reuters.com/Reuters/politicsNews"],
+    "FINANCE": ["https://feeds.reuters.com/reuters/businessNews"],
+    "WORLD": ["https://feeds.reuters.com/Reuters/worldNews"]
 }
 
-# ---------------- MAIN FETCHER ----------------
-def get_news():
-    """
-    Returns a dict:
-    {
-        title, summary, url, category
-    }
-    """
+def clean(text):
+    return re.sub("<.*?>", "", text or "").strip()
 
-    categories = list(FEEDS.keys())
-    random.shuffle(categories)
-
-    for category in categories:
-        urls = FEEDS[category]
-        random.shuffle(urls)
-
+def get_news(limit=10):
+    articles = []
+    for cat, urls in FEEDS.items():
         for url in urls:
             feed = feedparser.parse(url)
-
-            for entry in feed.entries[:5]:
-                title = getattr(entry, "title", "").strip()
-                summary = getattr(entry, "summary", "").strip()
-                link = getattr(entry, "link", "").strip()
-
-                if title and link:
-                    return {
-                        "title": title,
-                        "summary": summary,
-                        "url": link,
-                        "category": category
-                    }
-
-    return None
+            for e in feed.entries[:limit]:
+                articles.append({
+                    "title": clean(e.title),
+                    "summary": clean(getattr(e, "summary", "")),
+                    "url": e.link,
+                    "category": cat
+                })
+    random.shuffle(articles)
+    return articles
