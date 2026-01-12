@@ -6,9 +6,8 @@ from ai_writer import rewrite_news
 from dedupe import is_duplicate, mark_posted
 from banner import generate_banner
 
-# ---------------- CONFIG ----------------
-MAX_TWEET_LEN = 280
 POSTED_FILE = "posted.json"
+MAX_LEN = 280
 
 # ---------------- LOGGING ----------------
 def log(msg):
@@ -17,7 +16,7 @@ def log(msg):
         f.write(msg + "\n")
     print(msg)
 
-# ---------------- LOAD POSTED ----------------
+# ---------------- INIT FILE ----------------
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w") as f:
         json.dump([], f)
@@ -38,57 +37,47 @@ auth = tweepy.OAuth1UserHandler(
 )
 client_v1 = tweepy.API(auth)
 
-# ---------------- MAIN RUN ----------------
+# ---------------- MAIN ----------------
 def run():
     log("Bot started")
 
-    # 1️⃣ Get raw news
-    news = get_latest_news()
+    news = get_news()
     if not news:
-        log("No news fetched")
+        log("No news found")
         return
 
-    title = (news.get("title") or "").strip()
-    summary = (news.get("summary") or "").strip()
-    url = news.get("url")
-    category = (news.get("category") or "NEWS").upper()
+    title = news["title"]
+    summary = news["summary"]
+    url = news["url"]
+    category = news["category"]
 
-    if not title:
-        log("Empty title, skipping")
-        return
-
-    # 2️⃣ Deduplication
     if is_duplicate(title):
-        log("Duplicate news skipped")
+        log("Duplicate skipped")
         return
 
-    # 3️⃣ AI rewrite (clean, simple)
+    # AI rewrite (simple + clear)
     rewritten = rewrite_news(title, summary)
     headline = rewritten.get("headline", title)
     short_summary = rewritten.get("summary", summary)
 
-    # 4️⃣ Generate premium banner
+    # Generate premium banner
     image_path = generate_banner(
         headline=headline,
         summary=short_summary,
         category=category
     )
 
-    # 5️⃣ Compose tweet text
-    tweet_text = f"{headline}\n\n{url}" if url else headline
-    tweet_text = tweet_text[:MAX_TWEET_LEN]
+    tweet_text = f"{headline}\n\n{url}"
+    tweet_text = tweet_text[:MAX_LEN]
 
-    # 6️⃣ Upload image + post
     media = client_v1.media_upload(image_path)
     client_v2.create_tweet(
         text=tweet_text,
         media_ids=[media.media_id]
     )
 
-    # 7️⃣ Save posted hash
     mark_posted(title)
-
-    log(f"Posted successfully: {headline}")
+    log(f"Posted: {headline}")
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
