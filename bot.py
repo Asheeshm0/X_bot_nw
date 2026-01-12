@@ -1,21 +1,26 @@
 import os, json, tweepy
+from datetime import datetime
 from feeds import fetch_news, group_similar_news
 from ai_writer import generate_best_post
 from dedupe import hash_title
-from config import POSTED_FILE, MAX_TWEET_LEN
-from datetime import datetime
+from config import POSTED_FILE, MAX_TWEET_LEN, LOG_FILE
+
+# Ensure logs directory exists (CRITICAL FIX)
+os.makedirs("logs", exist_ok=True)
 
 # Load posted history
 if os.path.exists(POSTED_FILE):
-    posted = set(json.load(open(POSTED_FILE)))
+    with open(POSTED_FILE) as f:
+        posted = set(json.load(f))
 else:
     posted = set()
 
 def save_posted():
-    json.dump(list(posted), open(POSTED_FILE, "w"))
+    with open(POSTED_FILE, "w") as f:
+        json.dump(list(posted), f)
 
 def log(msg):
-    with open("logs/bot.log", "a") as f:
+    with open(LOG_FILE, "a") as f:
         f.write(f"[{datetime.now()}] {msg}\n")
 
 # X Client
@@ -37,9 +42,7 @@ def run():
         if h in posted:
             continue
 
-        headline, details, hashtags = generate_best_post(
-            main_title, group
-        )
+        headline, details, hashtags = generate_best_post(main_title, group)
 
         tweet = f"{headline}\n\n{details}\n\n{hashtags}"
         tweet = tweet[:MAX_TWEET_LEN]
@@ -49,7 +52,7 @@ def run():
         posted.add(h)
         save_posted()
         log(f"Posted: {headline}")
-        break   # one high-quality post per run
+        break  # one high-quality post per run
 
 if __name__ == "__main__":
     run()
