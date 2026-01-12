@@ -1,7 +1,7 @@
 import os
 import json
 import tweepy
-from feeds import get_latest_news
+from feeds import get_news
 from ai_writer import rewrite_news
 from dedupe import is_duplicate, mark_posted
 from banner import generate_banner
