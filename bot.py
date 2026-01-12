@@ -1,13 +1,12 @@
 import os
 import json
 import tweepy
+
+from config import MAX_TWEET_LEN, POSTED_FILE
 from feeds import get_news
 from ai_writer import rewrite_news
 from dedupe import is_duplicate, mark_posted
 from banner import generate_banner
-
-POSTED_FILE = "posted.json"
-MAX_LEN = 280
 
 # ---------------- LOGGING ----------------
 def log(msg):
@@ -16,7 +15,7 @@ def log(msg):
         f.write(msg + "\n")
     print(msg)
 
-# ---------------- INIT FILE ----------------
+# ---------------- INIT ----------------
 if not os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "w") as f:
         json.dump([], f)
@@ -52,28 +51,31 @@ def run():
     category = news["category"]
 
     if is_duplicate(title):
-        log("Duplicate skipped")
+        log(f"Duplicate skipped: {title}")
         return
 
-    # AI rewrite (simple + clear)
     rewritten = rewrite_news(title, summary)
     headline = rewritten.get("headline", title)
     short_summary = rewritten.get("summary", summary)
 
-    # Generate premium banner
-    image_path = generate_banner(
-        headline=headline,
-        summary=short_summary,
-        category=category
-    )
+    media_ids = []
+    try:
+        image_path = generate_banner(
+            headline=headline,
+            summary=short_summary,
+            category=category
+        )
+        media = client_v1.media_upload(image_path)
+        media_ids = [media.media_id]
+    except Exception as e:
+        log(f"Banner generation failed: {e}")
 
     tweet_text = f"{headline}\n\n{url}"
-    tweet_text = tweet_text[:MAX_LEN]
+    tweet_text = tweet_text[:MAX_TWEET_LEN]
 
-    media = client_v1.media_upload(image_path)
     client_v2.create_tweet(
         text=tweet_text,
-        media_ids=[media.media_id]
+        media_ids=media_ids if media_ids else None
     )
 
     mark_posted(title)
