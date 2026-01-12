@@ -1,40 +1,28 @@
 import os
 import json
 import tweepy
-from datetime import datetime
+from feeds import get_latest_news
+from ai_writer import rewrite_news
+from dedupe import is_duplicate, mark_posted
+from banner import generate_banner
 
-from feeds import fetch_news, group_similar_news
-from ai_writer import generate_best_post
-from dedupe import hash_title
-from config import POSTED_FILE, MAX_TWEET_LEN, LOG_FILE
-from banner import generate_banner   # ✅ NEW: banner generator
+# ---------------- CONFIG ----------------
+MAX_TWEET_LEN = 280
+POSTED_FILE = "posted.json"
 
-# -------------------------------------------------
-# Ensure required directories exist (GitHub Actions safe)
-# -------------------------------------------------
-os.makedirs("logs", exist_ok=True)
-os.makedirs("images", exist_ok=True)
-
-# -------------------------------------------------
-# Load posted history
-# -------------------------------------------------
-if os.path.exists(POSTED_FILE):
-    with open(POSTED_FILE, "r") as f:
-        posted = set(json.load(f))
-else:
-    posted = set()
-
-def save_posted():
-    with open(POSTED_FILE, "w") as f:
-        json.dump(list(posted), f)
-
+# ---------------- LOGGING ----------------
 def log(msg):
-    with open(LOG_FILE, "a") as f:
-        f.write(f"[{datetime.now()}] {msg}\n")
+    os.makedirs("logs", exist_ok=True)
+    with open("logs/bot.log", "a") as f:
+        f.write(msg + "\n")
+    print(msg)
 
-# -------------------------------------------------
-# X (Twitter) clients
-# -------------------------------------------------
+# ---------------- LOAD POSTED ----------------
+if not os.path.exists(POSTED_FILE):
+    with open(POSTED_FILE, "w") as f:
+        json.dump([], f)
+
+# ---------------- X AUTH ----------------
 client_v2 = tweepy.Client(
     consumer_key=os.getenv("X_API_KEY"),
     consumer_secret=os.getenv("X_API_SECRET"),
@@ -42,61 +30,70 @@ client_v2 = tweepy.Client(
     access_token_secret=os.getenv("X_ACCESS_SECRET")
 )
 
-auth_v1 = tweepy.OAuth1UserHandler(
+auth = tweepy.OAuth1UserHandler(
     os.getenv("X_API_KEY"),
     os.getenv("X_API_SECRET"),
     os.getenv("X_ACCESS_TOKEN"),
     os.getenv("X_ACCESS_SECRET")
 )
-client_v1 = tweepy.API(auth_v1)
+client_v1 = tweepy.API(auth)
 
-# -------------------------------------------------
-# Main bot logic
-# -------------------------------------------------
+# ---------------- MAIN RUN ----------------
 def run():
-    articles = fetch_news()
-    groups = group_similar_news(articles)
+    log("Bot started")
 
-    for group in groups:
-        main_title = group[0]["title"]
-        h = hash_title(main_title)
+    # 1️⃣ Get raw news
+    news = get_latest_news()
+    if not news:
+        log("No news fetched")
+        return
 
-        # Skip if already posted
-        if h in posted:
-            continue
+    title = (news.get("title") or "").strip()
+    summary = (news.get("summary") or "").strip()
+    url = news.get("url")
+    category = (news.get("category") or "NEWS").upper()
 
-        # AI generates clean professional content
-        headline, details, hashtags = generate_best_post(main_title, group)
+    if not title:
+        log("Empty title, skipping")
+        return
 
-        # Build banner image (NO API, pure PIL)
-        image_path = generate_banner(
-            headline=headline,
-            summary=details[:220],   # keep image text short & clear
-            category="NEWS"
-        )
+    # 2️⃣ Deduplication
+    if is_duplicate(title):
+        log("Duplicate news skipped")
+        return
 
-        # Upload image using v1 API
-        media = client_v1.media_upload(image_path)
+    # 3️⃣ AI rewrite (clean, simple)
+    rewritten = rewrite_news(title, summary)
+    headline = rewritten.get("headline", title)
+    short_summary = rewritten.get("summary", summary)
 
-        # Final tweet text (clean, readable)
-        tweet_text = f"{headline}\n\n{hashtags}"
-        tweet_text = tweet_text[:MAX_TWEET_LEN]
+    # 4️⃣ Generate premium banner
+    image_path = generate_banner(
+        headline=headline,
+        summary=short_summary,
+        category=category
+    )
 
-        # Post tweet with image
-        client_v2.create_tweet(
-            text=tweet_text,
-            media_ids=[media.media_id]
-        )
+    # 5️⃣ Compose tweet text
+    tweet_text = f"{headline}\n\n{url}" if url else headline
+    tweet_text = tweet_text[:MAX_TWEET_LEN]
 
-        # Save state
-        posted.add(h)
-        save_posted()
-        log(f"Posted with image: {headline}")
+    # 6️⃣ Upload image + post
+    media = client_v1.media_upload(image_path)
+    client_v2.create_tweet(
+        text=tweet_text,
+        media_ids=[media.media_id]
+    )
 
-        break  # ✅ one high-quality post per run
+    # 7️⃣ Save posted hash
+    mark_posted(title)
 
-# -------------------------------------------------
-# Entry point
-# -------------------------------------------------
+    log(f"Posted successfully: {headline}")
+
+# ---------------- ENTRY ----------------
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except Exception as e:
+        log(f"ERROR: {e}")
+        raise
