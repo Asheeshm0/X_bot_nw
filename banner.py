@@ -1,135 +1,123 @@
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import textwrap
 import uuid
 import os
 
-# ---------------- CONFIG ----------------
 WIDTH, HEIGHT = 1200, 675
-MARGIN_X = 70
-TOP_BAR_HEIGHT = 90
+
+FONT_BOLD = "Roboto-Bold.ttf"
+FONT_REGULAR = "Roboto-Regular.ttf"
 
 THEMES = {
     "NEWS": {
-        "bg": (15, 23, 42),
-        "accent": (251, 191, 36),
-        "text": (255, 255, 255),
-        "subtext": (203, 213, 225)
+        "bg_grad": [(15, 23, 42), (59, 130, 246)],
+        "accent": (255, 200, 0),
+        "tag_bg": (255, 200, 0),
+        "tag_text": (0, 0, 0)
     },
-    "HEALTH": {
-        "bg": (20, 83, 45),
-        "accent": (34, 197, 94),
-        "text": (255, 255, 255),
-        "subtext": (187, 247, 208)
+    "ALERT": {
+        "bg_grad": [(40, 0, 0), (220, 38, 38)],
+        "accent": (255, 255, 255),
+        "tag_bg": (220, 38, 38),
+        "tag_text": (255, 255, 255)
     },
     "TECH": {
-        "bg": (17, 24, 39),
-        "accent": (96, 165, 250),
-        "text": (255, 255, 255),
-        "subtext": (191, 219, 254)
+        "bg_grad": [(17, 24, 39), (139, 92, 246)],
+        "accent": (56, 189, 248),
+        "tag_bg": (139, 92, 246),
+        "tag_text": (255, 255, 255)
     },
-    "ECONOMY": {
-        "bg": (30, 41, 59),
+    "FINANCE": {
+        "bg_grad": [(6, 78, 59), (16, 185, 129)],
         "accent": (250, 204, 21),
-        "text": (255, 255, 255),
-        "subtext": (226, 232, 240)
+        "tag_bg": (250, 204, 21),
+        "tag_text": (0, 0, 0)
     }
 }
 
-# ---------------- FONT LOADER ----------------
-def load_font(size, bold=False):
+def load_font(name, size):
     try:
-        if bold:
-            return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
-        return ImageFont.truetype("DejaVuSans.ttf", size)
+        return ImageFont.truetype(name, size)
     except:
         return ImageFont.load_default()
 
-# ---------------- SAFE AUTO-FIT ----------------
-def fit_text(draw, text, max_width, start_size, bold=False):
-    text = (text or "").strip()
+def create_gradient_background(width, height, start, end):
+    base = Image.new("RGB", (width, height), start)
+    top = Image.new("RGB", (width, height), end)
+    mask = Image.new("L", (width, height))
+    mask.putdata([
+        int(255 * (x + y) / (width + height))
+        for y in range(height) for x in range(width)
+    ])
+    base.paste(top, (0, 0), mask)
+    return base
 
-    # HARD FALLBACK (never allow empty)
-    if not text:
-        text = "Breaking news update"
+def draw_glass_card(img, x, y, w, h):
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(overlay)
+    d.rounded_rectangle((x, y, x+w, y+h), radius=20, fill=(20, 25, 35, 210))
+    d.line((x+20, y, x+w-20, y), fill=(255, 255, 255, 100), width=2)
+    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle((x+10, y+10, x+w+10, y+h+15), radius=20, fill=(0, 0, 0, 100))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(15))
+    img = Image.alpha_composite(img, shadow)
+    img = Image.alpha_composite(img, overlay)
+    return img
 
-    size = start_size
+def draw_glow(img, color, x, y, r):
+    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(glow)
+    d.ellipse((x-r, y-r, x+r, y+r), fill=(*color, 80))
+    glow = glow.filter(ImageFilter.GaussianBlur(r / 1.5))
+    return Image.alpha_composite(img, glow)
 
-    while size > 20:
-        font = load_font(size, bold)
-        lines = textwrap.wrap(text, width=40)
-
-        # SAFETY CHECK
-        if not lines:
-            size -= 2
-            continue
-
-        longest = max(draw.textlength(line, font=font) for line in lines)
-
-        if longest <= max_width:
-            return font, lines
-
-        size -= 2
-
-    # FINAL FALLBACK
-    return load_font(20, bold), textwrap.wrap(text, 40) or [text]
-
-# ---------------- MAIN GENERATOR ----------------
 def generate_banner(headline, summary, category="NEWS"):
+    headline = (headline or "Breaking News Update").strip()
+    summary = (summary or "Details are emerging.").strip()
+
     theme = THEMES.get(category.upper(), THEMES["NEWS"])
 
-    img = Image.new("RGB", (WIDTH, HEIGHT), theme["bg"])
+    img = create_gradient_background(WIDTH, HEIGHT, *theme["bg_grad"]).convert("RGBA")
+    img = draw_glow(img, theme["bg_grad"][1], WIDTH, 0, 400)
+    img = draw_glow(img, theme["accent"], 0, HEIGHT, 300)
+
+    img = draw_glass_card(img, 60, 100, WIDTH-120, HEIGHT-160)
     draw = ImageDraw.Draw(img)
 
-    # Top bar
-    draw.rectangle((0, 0, WIDTH, TOP_BAR_HEIGHT), fill=theme["accent"])
-    tag_font = load_font(28, bold=True)
-    draw.text(
-        (MARGIN_X, 28),
-        f"{category.upper()} UPDATE",
-        fill=(0, 0, 0),
-        font=tag_font
-    )
+    tag_font = load_font(FONT_BOLD, 22)
+    tag_text = f"  {category.upper()} UPDATE  "
+    bx = tag_font.getbbox(tag_text)
+    draw.rounded_rectangle((100, 140, 100+bx[2]+20, 140+bx[3]+20), radius=10, fill=theme["tag_bg"])
+    draw.text((110, 150), tag_text, fill=theme["tag_text"], font=tag_font)
 
-    # Headline
-    headline_font, headline_lines = fit_text(
-        draw,
-        headline,
-        WIDTH - 2 * MARGIN_X,
-        start_size=60,
-        bold=True
-    )
+    font_size = 65
+    wrapper = textwrap.TextWrapper(width=30)
 
-    y = TOP_BAR_HEIGHT + 60
-    for line in headline_lines:
-        draw.text((MARGIN_X, y), line, fill=theme["text"], font=headline_font)
-        y += headline_font.size + 10
+    while font_size > 30:
+        font = load_font(FONT_BOLD, font_size)
+        lines = wrapper.wrap(headline)
+        if lines and max(draw.textlength(l, font=font) for l in lines) < 900:
+            break
+        font_size -= 4
 
-    # Summary
-    summary_font, summary_lines = fit_text(
-        draw,
-        summary,
-        WIDTH - 2 * MARGIN_X,
-        start_size=36,
-        bold=False
-    )
+    y = 220
+    for l in lines[:3]:
+        draw.text((100, y), l, fill="white", font=font)
+        y += font_size + 10
 
-    y += 30
-    for line in summary_lines[:3]:
-        draw.text((MARGIN_X, y), line, fill=theme["subtext"], font=summary_font)
-        y += summary_font.size + 8
+    draw.line((100, y+10, 220, y+10), fill=theme["accent"], width=4)
+    y += 40
 
-    # Footer
-    footer_font = load_font(22)
-    draw.text(
-        (MARGIN_X, HEIGHT - 50),
-        "Verified news • Auto-generated banner",
-        fill=theme["subtext"],
-        font=footer_font
-    )
+    sum_font = load_font(FONT_REGULAR, 32)
+    for l in textwrap.wrap(summary, 60)[:3]:
+        draw.text((100, y), l, fill=(200, 210, 220), font=sum_font)
+        y += 40
 
-    # Save
+    draw.text((100, HEIGHT-80), "Verified News • Auto-generated", fill=(150, 160, 170),
+              font=load_font(FONT_REGULAR, 18))
+
     os.makedirs("images", exist_ok=True)
-    filename = f"images/news_{uuid.uuid4().hex}.png"
-    img.save(filename, optimize=True)
-
-    return filename
+    path = f"images/viral_{uuid.uuid4().hex}.png"
+    img.convert("RGB").save(path, optimize=True)
+    return path
