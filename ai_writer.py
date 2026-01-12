@@ -1,58 +1,59 @@
 import os
-import warnings
 import google.generativeai as genai
 
-# Silence deprecation warning (does NOT affect execution)
-warnings.filterwarnings("ignore", category=FutureWarning)
+# ---------------- CONFIG ----------------
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
-model = genai.GenerativeModel("gemini-2.5-flash")
-
-def generate_best_post(topic, articles):
+# ---------------- MAIN FUNCTION ----------------
+def rewrite_news(title: str, summary: str) -> dict:
     """
-    articles = list of {source, title, summary}
+    Returns:
+    {
+        headline: str,
+        summary: str
+    }
     """
 
-    context = ""
-    for a in articles:
-        context += f"\nTitle: {a['title']}\nSummary: {a['summary']}\n"
+    # Fallback (always safe)
+    fallback = {
+        "headline": title.strip(),
+        "summary": (summary or "").strip()
+    }
 
-    prompt = f"""
-You are a senior editor for a professional news account on X.
+    if not GEMINI_API_KEY:
+        return fallback
 
-TASK:
-Compare multiple reports about the SAME news and write ONE best post.
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
-RULES:
-- Neutral, professional tone
-- Clear English
-- Headline under 180 characters
-- Max 3 bullet points
-- Use only confirmed facts
-- Do NOT mention sources
-- Generate BEST hashtags (3–5)
-- NO emojis
-- NO misinformation
+        prompt = f"""
+Rewrite the following news into:
+1) A short, professional headline (max 12 words)
+2) A clear 1–2 sentence summary
+No emojis. No hashtags. Neutral news tone.
 
-NEWS CONTEXT:
-{context}
+TITLE:
+{title}
 
-RETURN EXACT FORMAT:
-
-HEADLINE:
-DETAILS:
-HASHTAGS:
+SUMMARY:
+{summary}
 """
 
-    r = model.generate_content(prompt)
-    text = r.text.strip()
+        resp = model.generate_content(prompt)
+        text = resp.text.strip()
 
-    def extract(label):
-        return text.split(label)[1].split("\n")[0].strip()
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    headline = extract("HEADLINE:")
-    details = text.split("DETAILS:")[1].split("HASHTAGS:")[0].strip()
-    hashtags = extract("HASHTAGS:")
+        headline = lines[0] if lines else title
+        clean_summary = " ".join(lines[1:3]) if len(lines) > 1 else summary
 
-    return headline, details, hashtags
+        return {
+            "headline": headline[:120],
+            "summary": clean_summary[:300]
+        }
+
+    except Exception:
+        return fallback
