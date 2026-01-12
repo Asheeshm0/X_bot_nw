@@ -10,8 +10,8 @@ TOP_BAR_HEIGHT = 90
 
 THEMES = {
     "NEWS": {
-        "bg": (15, 23, 42),        # dark blue
-        "accent": (251, 191, 36),  # amber
+        "bg": (15, 23, 42),
+        "accent": (251, 191, 36),
         "text": (255, 255, 255),
         "subtext": (203, 213, 225)
     },
@@ -44,17 +44,34 @@ def load_font(size, bold=False):
     except:
         return ImageFont.load_default()
 
-# ---------------- AUTO FONT FIT ----------------
+# ---------------- SAFE AUTO-FIT ----------------
 def fit_text(draw, text, max_width, start_size, bold=False):
+    text = (text or "").strip()
+
+    # HARD FALLBACK (never allow empty)
+    if not text:
+        text = "Breaking news update"
+
     size = start_size
+
     while size > 20:
         font = load_font(size, bold)
         lines = textwrap.wrap(text, width=40)
+
+        # SAFETY CHECK
+        if not lines:
+            size -= 2
+            continue
+
         longest = max(draw.textlength(line, font=font) for line in lines)
+
         if longest <= max_width:
             return font, lines
+
         size -= 2
-    return load_font(20, bold), textwrap.wrap(text, 40)
+
+    # FINAL FALLBACK
+    return load_font(20, bold), textwrap.wrap(text, 40) or [text]
 
 # ---------------- MAIN GENERATOR ----------------
 def generate_banner(headline, summary, category="NEWS"):
@@ -73,7 +90,7 @@ def generate_banner(headline, summary, category="NEWS"):
         font=tag_font
     )
 
-    # Headline (AUTO SCALE)
+    # Headline
     headline_font, headline_lines = fit_text(
         draw,
         headline,
@@ -87,7 +104,7 @@ def generate_banner(headline, summary, category="NEWS"):
         draw.text((MARGIN_X, y), line, fill=theme["text"], font=headline_font)
         y += headline_font.size + 10
 
-    # Summary (AUTO SCALE)
+    # Summary
     summary_font, summary_lines = fit_text(
         draw,
         summary,
@@ -97,7 +114,7 @@ def generate_banner(headline, summary, category="NEWS"):
     )
 
     y += 30
-    for line in summary_lines[:3]:  # max 3 lines for clarity
+    for line in summary_lines[:3]:
         draw.text((MARGIN_X, y), line, fill=theme["subtext"], font=summary_font)
         y += summary_font.size + 8
 
