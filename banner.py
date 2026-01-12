@@ -114,8 +114,7 @@ def generate_banner(headline, summary, category="NEWS"):
         draw.text((100, y), l, fill=(200, 210, 220), font=sum_font)
         y += 40
 
-    draw.text((100, HEIGHT-80), "Verified News • Auto-generated", fill=(150, 160, 170),
-              font=load_font(FONT_REGULAR, 18))
+    
 
     os.makedirs("images", exist_ok=True)
     path = f"images/viral_{uuid.uuid4().hex}.png"
