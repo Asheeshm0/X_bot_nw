@@ -11,10 +11,11 @@ def rewrite_news(title, summary, category):
     """
     Returns a dictionary:
     {
-      headline: str,
-      body: str,
-      hashtags: list[str]
+      "headline": str,
+      "body": str,
+      "hashtags": list[str]
     }
+    ALWAYS returns valid types (never a string).
     """
 
     prompt = f"""
@@ -28,14 +29,14 @@ STRICT RULES:
 - DO NOT mention websites or news agencies
 - Use simple language (easy for common people)
 - Focus on WHY this news matters
-- Avoid tech-heavy language
+- Avoid technical jargon
 - Prefer Indian & global political context
 
-HASHTAGS:
+HASHTAGS RULES:
 Generate 7–11 hashtags total:
-- 2–3 trending / event-based hashtags
+- 2–3 trending or event-based hashtags
 - 2–4 evergreen political/global hashtags
-- 3–5 context hashtags (India, leaders, regions)
+- 3–5 India / region / leader based hashtags
 
 DO NOT use generic tags like:
 #news #update #breaking #viral
@@ -48,11 +49,11 @@ TITLE:
 SUMMARY:
 {summary}
 
-OUTPUT (STRICT JSON ONLY):
+OUTPUT FORMAT (STRICT JSON ONLY):
 {{
-  "headline": "...",
-  "body": "...",
-  "hashtags": ["#TagOne", "#TagTwo"]
+  "headline": "Short strong headline",
+  "body": "2–3 simple sentences explaining the news clearly.",
+  "hashtags": ["#ExampleTag1", "#ExampleTag2"]
 }}
 """
 
@@ -60,21 +61,54 @@ OUTPUT (STRICT JSON ONLY):
         response = MODEL.generate_content(prompt)
         text = response.text.strip()
 
-        # Extract JSON safely
+        # ---- SAFE JSON EXTRACTION ----
         start = text.find("{")
         end = text.rfind("}") + 1
+
+        if start == -1 or end == -1:
+            raise ValueError("No JSON found")
+
         data = json.loads(text[start:end])
 
+        headline = str(data.get("headline", title)).strip()
+        body = str(data.get("body", summary)).strip()
+
+        hashtags = data.get("hashtags", [])
+        if not isinstance(hashtags, list):
+            hashtags = []
+
+        # Clean hashtags
+        clean_tags = []
+        for tag in hashtags:
+            if isinstance(tag, str) and tag.startswith("#"):
+                clean_tags.append(tag.strip())
+
+        # Minimum hashtag fallback
+        if len(clean_tags) < 5:
+            clean_tags = [
+                "#India",
+                "#Politics",
+                "#WorldNews",
+                "#GlobalAffairs",
+                "#PublicInterest"
+            ]
+
         return {
-            "headline": data.get("headline", title),
-            "body": data.get("body", summary),
-            "hashtags": data.get("hashtags", [])
+            "headline": headline,
+            "body": body,
+            "hashtags": clean_tags[:11]
         }
 
-    except Exception:
-        # Safe fallback
+    except Exception as e:
+        # -------- SAFE FALLBACK (NEVER CRASH) --------
         return {
             "headline": title,
             "body": summary,
-            "hashtags": []
+            "hashtags": [
+                "#India",
+                "#Politics",
+                "#WorldNews",
+                "#GlobalAffairs",
+                "#PublicInterest"
+            ]
         }
