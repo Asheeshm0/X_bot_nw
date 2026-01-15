@@ -1,6 +1,7 @@
+# bot.py
 import os
 import tweepy
-from feeds import get_news
+from feeds import get_compared_news
 from banner import generate_banner
 from ai_writer import rewrite_news
 from dedupe import is_duplicate, mark_posted
@@ -12,7 +13,6 @@ def log(msg):
         f.write(msg + "\n")
     print(msg)
 
-# X Auth
 client_v2 = tweepy.Client(
     consumer_key=os.getenv("X_API_KEY"),
     consumer_secret=os.getenv("X_API_SECRET"),
@@ -20,58 +20,47 @@ client_v2 = tweepy.Client(
     access_token_secret=os.getenv("X_ACCESS_SECRET")
 )
 
-auth = tweepy.OAuth1UserHandler(
-    os.getenv("X_API_KEY"),
-    os.getenv("X_API_SECRET"),
-    os.getenv("X_ACCESS_TOKEN"),
-    os.getenv("X_ACCESS_SECRET")
+client_v1 = tweepy.API(
+    tweepy.OAuth1UserHandler(
+        os.getenv("X_API_KEY"),
+        os.getenv("X_API_SECRET"),
+        os.getenv("X_ACCESS_TOKEN"),
+        os.getenv("X_ACCESS_SECRET")
+    )
 )
-client_v1 = tweepy.API(auth)
 
 def run():
-    for news in get_news():
-        title = news["title"]
+    news = get_compared_news()
 
-        if is_duplicate(title):
-            continue
+    if not news:
+        log("No news found")
+        return
 
-        # 🔹 Gemini rewrite
-        ai = rewrite_news(title, news["summary"])
+    title = news["title"]
 
-        headline = ai["headline"]
-        summary = ai["summary"]
-        hashtags = " ".join(ai["hashtags"])
+    if is_duplicate(title):
+        log("Duplicate skipped")
+        return
 
-        # 🔹 Generate banner (text ALWAYS fits)
-        image_path = generate_banner(
-            headline=headline,
-            summary=summary,
-            category=news["category"]
-        )
+    ai = rewrite_news(title, news["summary"])
 
-        media = client_v1.media_upload(image_path)
+    headline = ai["headline"]
+    summary = ai["summary"]
+    hashtags = " ".join(ai["hashtags"])
 
-        # 🔹 Main tweet (NO LINK)
-        tweet_text = f"{headline}\n\n{summary}\n\n{hashtags}"
-        tweet_text = tweet_text[:MAX_TWEET_LEN]
+    image_path = generate_banner(headline, summary, news["category"])
+    media = client_v1.media_upload(image_path)
 
-        tweet = client_v2.create_tweet(
-            text=tweet_text,
-            media_ids=[media.media_id]
-        )
+    tweet = f"{headline}\n\n{summary}\n\n{hashtags}"
+    tweet = tweet[:MAX_TWEET_LEN]
 
-        # 🔹 Optional reply with source link (pro style)
-        try:
-            client_v2.create_tweet(
-                text=f"Source: {news['url']}",
-                in_reply_to_tweet_id=tweet.data["id"]
-            )
-        except:
-            pass
+    client_v2.create_tweet(
+        text=tweet,
+        media_ids=[media.media_id]
+    )
 
-        mark_posted(title)
-        log(f"Posted: {headline}")
-        break
+    mark_posted(title)
+    log(f"Posted compared news: {headline}")
 
 if __name__ == "__main__":
     run()
