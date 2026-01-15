@@ -58,7 +58,12 @@ def already_posted_today(slot):
 def mark_posted_today(slot):
     today = datetime.now(IST).strftime("%Y-%m-%d")
     state = load_post_state()
-    state[today] = slot
+
+    # 🔒 ABSOLUTE SAFETY (FINAL FIX)
+    if not isinstance(state, dict):
+        state = {}
+
+    state[str(today)] = str(slot)
     save_post_state(state)
 
 # ---------------- X AUTH ----------------
