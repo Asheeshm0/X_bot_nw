@@ -2,61 +2,79 @@ import os
 import json
 import google.generativeai as genai
 
+# ---------------- GEMINI SETUP ----------------
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
 MODEL = genai.GenerativeModel("gemini-1.5-flash")
 
-def rewrite_news(title, summary):
+# ---------------- AI WRITER ----------------
+def rewrite_news(title, summary, category):
     """
-    Returns:
+    Returns a dictionary:
     {
-      headline: short clear headline,
-      summary: simple 2-line summary,
-      hashtags: list of hashtags
+      headline: str,
+      body: str,
+      hashtags: list[str]
     }
     """
+
     prompt = f"""
-You are a professional news editor.
+You are a senior editor of a large Indian news account on X (Twitter).
 
-Rewrite the following news in simple, neutral English.
+TASK:
+Rewrite the news in a professional, clear, and engaging way.
 
-RULES:
-- Headline: max 90 characters
-- Summary: max 2 short lines
-- Easy to understand
-- No emojis
-- No clickbait
-- Generate 4 relevant hashtags (no spam)
+STRICT RULES:
+- DO NOT include any source links
+- DO NOT mention websites or news agencies
+- Use simple language (easy for common people)
+- Focus on WHY this news matters
+- Avoid tech-heavy language
+- Prefer Indian & global political context
 
-Return ONLY valid JSON.
+HASHTAGS:
+Generate 7–11 hashtags total:
+- 2–3 trending / event-based hashtags
+- 2–4 evergreen political/global hashtags
+- 3–5 context hashtags (India, leaders, regions)
+
+DO NOT use generic tags like:
+#news #update #breaking #viral
+
+CATEGORY: {category}
 
 TITLE:
 {title}
 
 SUMMARY:
 {summary}
+
+OUTPUT (STRICT JSON ONLY):
+{{
+  "headline": "...",
+  "body": "...",
+  "hashtags": ["#TagOne", "#TagTwo"]
+}}
 """
 
     try:
-        res = MODEL.generate_content(prompt)
-        text = res.text.strip()
+        response = MODEL.generate_content(prompt)
+        text = response.text.strip()
 
-        # Remove markdown if Gemini adds it
-        if text.startswith("```"):
-            text = text.split("```")[1]
-
-        data = json.loads(text)
+        # Extract JSON safely
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        data = json.loads(text[start:end])
 
         return {
             "headline": data.get("headline", title),
-            "summary": data.get("summary", summary[:160]),
+            "body": data.get("body", summary),
             "hashtags": data.get("hashtags", [])
         }
 
-    except Exception as e:
-        # SAFE FALLBACK (never crash)
+    except Exception:
+        # Safe fallback
         return {
-            "headline": title[:90],
-            "summary": summary[:160],
-            "hashtags": ["#News", "#Update"]
+            "headline": title,
+            "body": summary,
+            "hashtags": []
         }
