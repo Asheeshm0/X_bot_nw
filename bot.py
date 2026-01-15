@@ -2,7 +2,7 @@ import os
 import json
 import tweepy
 from datetime import datetime
-import pytz
+from zoneinfo import ZoneInfo
 
 from feeds import get_news_batch
 from ai_writer import rewrite_news
@@ -11,7 +11,7 @@ from banner import generate_banner
 from config import MAX_TWEET_LEN
 
 # ---------------- TIME CONFIG ----------------
-IST = pytz.timezone("Asia/Kolkata")
+IST = ZoneInfo("Asia/Kolkata")
 POST_STATE_FILE = "post_state.json"
 
 POST_SLOTS = {
@@ -89,17 +89,15 @@ def select_best_news(news_items):
 def run():
     log("Bot started")
 
-    # ---- TIME CHECK ----
     slot = get_current_slot()
     if not slot:
-        log("Not a valid posting time. Exiting safely.")
+        log("Not a valid posting time. Exiting.")
         return
 
     if already_posted_today(slot):
         log(f"Already posted for {slot}. Exiting.")
         return
 
-    # ---- FETCH NEWS ----
     news_list = get_news_batch(limit=5)
     if not news_list:
         log("No news found")
@@ -110,18 +108,15 @@ def run():
     summary = best_news["summary"]
     category = best_news["category"]
 
-    # ---- DEDUPLICATION ----
     if is_duplicate(title):
         log("Duplicate skipped")
         return
 
-    # ---- AI REWRITE ----
     ai = rewrite_news(title, summary, category)
     headline = ai["headline"]
     body = ai["body"]
     hashtags = ai["hashtags"]
 
-    # ---- BANNER ----
     media_ids = []
     try:
         image_path = generate_banner(
@@ -134,7 +129,6 @@ def run():
     except Exception as e:
         log(f"Banner failed: {e}")
 
-    # ---- TWEET ----
     tweet_text = f"{headline}\n\n{body}\n\n" + " ".join(hashtags)
     tweet_text = tweet_text[:MAX_TWEET_LEN]
 
