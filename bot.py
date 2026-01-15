@@ -1,7 +1,7 @@
 import os
 import json
 import tweepy
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from feeds import get_news_batch
@@ -14,11 +14,15 @@ from config import MAX_TWEET_LEN
 IST = ZoneInfo("Asia/Kolkata")
 POST_STATE_FILE = "post_state.json"
 
+# Posting slots (IST)
 POST_SLOTS = {
     "morning": (5, 9),
     "noon": (11, 14),
     "evening": (18, 22)
 }
+
+# Allow posting even if bot starts late (minutes)
+GRACE_MINUTES = 20
 
 # ---------------- LOGGING ----------------
 def log(msg):
@@ -30,10 +34,19 @@ def log(msg):
 # ---------------- SLOT HELPERS ----------------
 def get_current_slot():
     now = datetime.now(IST)
-    hour = now.hour
-    for slot, (start, end) in POST_SLOTS.items():
-        if start <= hour < end:
+
+    for slot, (start_hour, end_hour) in POST_SLOTS.items():
+        start = now.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+        end = now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
+
+        # Normal window
+        if start <= now < end:
             return slot
+
+        # Grace window after slot end
+        if end <= now <= end + timedelta(minutes=GRACE_MINUTES):
+            return slot
+
     return None
 
 def load_post_state():
@@ -58,11 +71,8 @@ def already_posted_today(slot):
 def mark_posted_today(slot):
     today = datetime.now(IST).strftime("%Y-%m-%d")
     state = load_post_state()
-
-    # 🔒 ABSOLUTE SAFETY (FINAL FIX)
     if not isinstance(state, dict):
         state = {}
-
     state[str(today)] = str(slot)
     save_post_state(state)
 
@@ -87,22 +97,25 @@ client_v1 = tweepy.API(
 def select_best_news(news_items):
     if not news_items:
         return None
-    news_items.sort(key=lambda x: len(x["summary"]), reverse=True)
+    # Prefer longer summaries (often higher importance)
+    news_items.sort(key=lambda x: len(x.get("summary", "")), reverse=True)
     return news_items[0]
 
 # ---------------- MAIN BOT ----------------
 def run():
     log("Bot started")
 
+    # ---- TIME CHECK (WITH GRACE) ----
     slot = get_current_slot()
     if not slot:
-        log("Not a valid posting time. Exiting.")
+        log("Not a valid posting time (even with grace). Exiting.")
         return
 
     if already_posted_today(slot):
         log(f"Already posted for {slot}. Exiting.")
         return
 
+    # ---- FETCH & COMPARE NEWS ----
     news_list = get_news_batch(limit=5)
     if not news_list:
         log("No news found")
@@ -113,15 +126,18 @@ def run():
     summary = best_news["summary"]
     category = best_news["category"]
 
+    # ---- DEDUPLICATION ----
     if is_duplicate(title):
         log("Duplicate skipped")
         return
 
+    # ---- AI REWRITE ----
     ai = rewrite_news(title, summary, category)
-    headline = ai["headline"]
-    body = ai["body"]
-    hashtags = ai["hashtags"]
+    headline = ai.get("headline", title)
+    body = ai.get("body", summary)
+    hashtags = ai.get("hashtags", [])
 
+    # ---- BANNER ----
     media_ids = []
     try:
         image_path = generate_banner(
@@ -134,6 +150,7 @@ def run():
     except Exception as e:
         log(f"Banner failed: {e}")
 
+    # ---- POST TWEET (NO LINKS) ----
     tweet_text = f"{headline}\n\n{body}\n\n" + " ".join(hashtags)
     tweet_text = tweet_text[:MAX_TWEET_LEN]
 
