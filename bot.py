@@ -1,16 +1,12 @@
 import os
-import json
-from datetime import datetime, timezone
 import tweepy
+from datetime import datetime, timedelta
 
 from feeds import get_news_batch
 from ai_writer import rewrite_news
 from dedupe import is_duplicate, mark_posted
 from banner import generate_banner
 from config import MAX_TWEET_LEN
-
-# ---------------- FILES ----------------
-STATE_FILE = "post_state.json"
 
 # ---------------- LOGGING ----------------
 def log(msg):
@@ -19,46 +15,12 @@ def log(msg):
         f.write(msg + "\n")
     print(msg)
 
-# ---------------- STATE HANDLING (SAFE) ----------------
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {"last_post": None}
-
-    try:
-        with open(STATE_FILE, "r") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
-
-    return {"last_post": None}
-
-
-def save_state(state: dict):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
-
-# ---------------- POSTING WINDOW (DELAY SAFE) ----------------
-def is_posting_window():
-    """
-    Allows posting in 3 broad windows (IST-safe even with delays):
-    Morning: 04–08
-    Noon:    10–14
-    Evening: 17–21
-    """
-    now = datetime.now(timezone.utc)
-    hour = now.hour + 5  # rough IST offset (no pytz needed)
-
-    windows = [(4, 8), (10, 14), (17, 21)]
-    return any(start <= hour <= end for start, end in windows)
-
 # ---------------- X AUTH ----------------
 client_v2 = tweepy.Client(
     consumer_key=os.getenv("X_API_KEY"),
     consumer_secret=os.getenv("X_API_SECRET"),
     access_token=os.getenv("X_ACCESS_TOKEN"),
-    access_token_secret=os.getenv("X_ACCESS_SECRET"),
+    access_token_secret=os.getenv("X_ACCESS_SECRET")
 )
 
 client_v1 = tweepy.API(
@@ -70,48 +32,43 @@ client_v1 = tweepy.API(
     )
 )
 
-# ---------------- NEWS COMPARISON ----------------
+# ---------------- POSTING WINDOW (DELAY SAFE) ----------------
+POST_WINDOWS = [
+    (5, 8),    # Morning
+    (11, 14),  # Noon
+    (18, 21),  # Evening
+]
+
+def valid_posting_time():
+    now = datetime.utcnow() + timedelta(minutes=50)  # ⏱ START DELAY BUFFER
+    hour = now.hour
+    for start, end in POST_WINDOWS:
+        if start <= hour <= end:
+            return True
+    return False
+
+# ---------------- NEWS SELECTION ----------------
 def select_best_news(items):
-    """
-    Picks the most important news:
-    - Longer summary
-    - Political / global priority
-    """
-    if not items:
-        return None
-
-    def score(n):
-        score = len(n.get("summary", ""))
-        if n.get("category", "").lower() in ["politics", "world", "india"]:
-            score += 500
-        return score
-
-    items.sort(key=score, reverse=True)
-    return items[0]
+    items.sort(key=lambda x: len(x["summary"]), reverse=True)
+    return items[0] if items else None
 
 # ---------------- MAIN BOT ----------------
 def run():
     log("Bot started")
 
-    if not is_posting_window():
+    if not valid_posting_time():
         log("Not a valid posting window. Exiting safely.")
         return
 
-    state = load_state()
-
-    news_list = get_news_batch(limit=6)
+    news_list = get_news_batch(limit=8)
     if not news_list:
-        log("No news found")
+        log("No news fetched")
         return
 
     best = select_best_news(news_list)
-    if not best:
-        log("No suitable news selected")
-        return
-
     title = best["title"]
     summary = best["summary"]
-    category = best.get("category", "Politics")
+    category = best["category"]
 
     if is_duplicate(title):
         log("Duplicate skipped")
@@ -119,11 +76,11 @@ def run():
 
     ai = rewrite_news(title, summary, category)
 
-    headline = ai.get("headline", title)
-    body = ai.get("body", summary)
-    hashtags = ai.get("hashtags", [])
+    headline = ai["headline"]
+    body = ai["body"]
+    hashtags = ai["hashtags"]
 
-    # ---------------- IMAGE ----------------
+    # ---------- IMAGE ----------
     media_ids = []
     try:
         image_path = generate_banner(
@@ -136,7 +93,6 @@ def run():
     except Exception as e:
         log(f"Banner error: {e}")
 
-    # ---------------- FINAL TWEET ----------------
     tweet_text = f"{headline}\n\n{body}\n\n" + " ".join(hashtags)
     tweet_text = tweet_text[:MAX_TWEET_LEN]
 
@@ -146,9 +102,6 @@ def run():
     )
 
     mark_posted(title)
-    state["last_post"] = datetime.utcnow().isoformat()
-    save_state(state)
-
     log(f"Posted successfully: {headline}")
 
 # ---------------- ENTRY ----------------
@@ -156,4 +109,4 @@ if __name__ == "__main__":
     try:
         run()
     except Exception as e:
-        log(f"FATAL ERROR: {e}")
+        log(f"ERROR: {e}")
